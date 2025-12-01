@@ -1,61 +1,143 @@
-.PHONY: help up down build logs restart shell ps clean clean-all clean-volumes \
-        dev-up dev-down dev-build dev-logs dev-restart dev-shell dev-ps \
-        prod-up prod-down prod-build prod-logs prod-restart \
-        backend-shell gateway-shell mongo-shell \
-        backend-build backend-install backend-type-check backend-dev \
-        db-reset db-backup status health
+# ============================================================================
+# CUET DevOps Hackathon - Makefile
+# ============================================================================
+# Docker Services:
+#   up - Start services (use: make up [service...] or make up MODE=prod, ARGS="--build" for options)
+#   down - Stop services (use: make down [service...] or make down MODE=prod, ARGS="--volumes" for options)
+#   build - Build containers (use: make build [service...] or make build MODE=prod)
+#   logs - View logs (use: make logs [service] or make logs SERVICE=backend, MODE=prod for production)
+#   restart - Restart services (use: make restart [service...] or make restart MODE=prod)
+#   shell - Open shell in container (use: make shell [service] or make shell SERVICE=gateway, MODE=prod, default: backend)
+#   ps - Show running containers (use MODE=prod for production)
+#
+# Convenience Aliases (Development):
+#   dev-up - Alias: Start development environment
+#   dev-down - Alias: Stop development environment
+#   dev-build - Alias: Build development containers
+#   dev-logs - Alias: View development logs
+#   dev-restart - Alias: Restart development services
+#   dev-shell - Alias: Open shell in backend container
+#   dev-ps - Alias: Show running development containers
+#   backend-shell - Alias: Open shell in backend container
+#   gateway-shell - Alias: Open shell in gateway container
+#   mongo-shell - Open MongoDB shell
+#
+# Convenience Aliases (Production):
+#   prod-up - Alias: Start production environment
+#   prod-down - Alias: Stop production environment
+#   prod-build - Alias: Build production containers
+#   prod-logs - Alias: View production logs
+#   prod-restart - Alias: Restart production services
+#
+# Backend:
+#   backend-build - Build backend TypeScript
+#   backend-install - Install backend dependencies
+#   backend-type-check - Type check backend code
+#   backend-dev - Run backend in development mode (local, not Docker)
+#
+# Database:
+#   db-reset - Reset MongoDB database (WARNING: deletes all data)
+#   db-backup - Backup MongoDB database
+#
+# Cleanup:
+#   clean - Remove containers and networks (both dev and prod)
+#   clean-all - Remove containers, networks, volumes, and images
+#   clean-volumes - Remove all volumes
+#
+# Utilities:
+#   status - Alias for ps
+#   health - Check service health
+#
+# Help:
+#   help - Display this help message
+# ============================================================================
 
-# Default target
+.PHONY: help
 .DEFAULT_GOAL := help
 
-# Variables
+# Colors for output
+CYAN := \033[0;36m
+GREEN := \033[0;32m
+YELLOW := \033[0;33m
+RED := \033[0;31m
+NC := \033[0m # No Color
+
+# Environment detection
 MODE ?= dev
 SERVICE ?= backend
-COMPOSE_FILE_DEV = -f docker/compose.development.yaml
-COMPOSE_FILE_PROD = -f docker/compose.production.yaml
-COMPOSE_CMD = docker compose
 ARGS ?=
+PROJECT_ROOT := $(shell pwd)
 
-# Determine which compose file to use
+# Compose file selection
 ifeq ($(MODE),prod)
-	COMPOSE_FILE = $(COMPOSE_FILE_PROD)
-	ENV_FILE = --env-file .env
+	COMPOSE_FILE = docker/compose.production.yaml
+	ENV_MODE = production
 else
-	COMPOSE_FILE = $(COMPOSE_FILE_DEV)
-	ENV_FILE = --env-file .env
+	COMPOSE_FILE = docker/compose.development.yaml
+	ENV_MODE = development
 endif
 
-##@ Docker Services
+# Docker Compose command
+DOCKER_COMPOSE = docker compose -f $(COMPOSE_FILE) --env-file $(PROJECT_ROOT)/.env
 
-up: ## Start services (use: make up [service...] or make up MODE=prod, ARGS="--build" for options)
-	@echo "Starting services in $(MODE) mode..."
-	$(COMPOSE_CMD) $(COMPOSE_FILE) $(ENV_FILE) up -d $(ARGS) $(filter-out $@,$(MAKECMDGOALS))
+# ============================================================================
+# Help Target
+# ============================================================================
+help: ## Display this help message
+	@echo "$(CYAN)╔════════════════════════════════════════════════════════════════╗$(NC)"
+	@echo "$(CYAN)║        CUET DevOps Hackathon - Makefile Commands              ║$(NC)"
+	@echo "$(CYAN)╚════════════════════════════════════════════════════════════════╝$(NC)"
+	@echo ""
+	@echo "$(GREEN)Main Commands:$(NC)"
+	@awk 'BEGIN {FS = ":.*##"; printf ""} /^[a-zA-Z_-]+:.*?##/ { printf "  $(CYAN)%-18s$(NC) %s\n", $$1, $$2 }' $(MAKEFILE_LIST)
+	@echo ""
+	@echo "$(YELLOW)Usage Examples:$(NC)"
+	@echo "  make dev-up              # Start development environment"
+	@echo "  make prod-up             # Start production environment"
+	@echo "  make logs SERVICE=backend MODE=prod"
+	@echo "  make shell SERVICE=gateway"
+	@echo ""
 
-down: ## Stop services (use: make down [service...] or make down MODE=prod, ARGS="--volumes" for options)
-	@echo "Stopping services in $(MODE) mode..."
-	$(COMPOSE_CMD) $(COMPOSE_FILE) $(ENV_FILE) down $(ARGS) $(filter-out $@,$(MAKECMDGOALS))
+# ============================================================================
+# Core Docker Operations
+# ============================================================================
+up: ## Start services (MODE=dev|prod, ARGS=additional args)
+	@echo "$(GREEN)Starting $(ENV_MODE) services...$(NC)"
+	$(DOCKER_COMPOSE) up -d $(ARGS)
+	@echo "$(GREEN)✓ Services started successfully!$(NC)"
 
-build: ## Build containers (use: make build [service...] or make build MODE=prod)
-	@echo "Building containers in $(MODE) mode..."
-	$(COMPOSE_CMD) $(COMPOSE_FILE) $(ENV_FILE) build $(ARGS) $(filter-out $@,$(MAKECMDGOALS))
+down: ## Stop services (MODE=dev|prod, ARGS=additional args)
+	@echo "$(YELLOW)Stopping $(ENV_MODE) services...$(NC)"
+	$(DOCKER_COMPOSE) down $(ARGS)
+	@echo "$(GREEN)✓ Services stopped successfully!$(NC)"
 
-logs: ## View logs (use: make logs [service] or make logs SERVICE=backend, MODE=prod for production)
-	@echo "Showing logs for $(MODE) mode..."
-	$(COMPOSE_CMD) $(COMPOSE_FILE) $(ENV_FILE) logs -f $(if $(filter-out $@,$(MAKECMDGOALS)),$(filter-out $@,$(MAKECMDGOALS)),$(if $(filter logs,$(MAKECMDGOALS)),$(SERVICE),))
+build: ## Build containers (MODE=dev|prod)
+	@echo "$(GREEN)Building $(ENV_MODE) containers...$(NC)"
+	$(DOCKER_COMPOSE) build --no-cache
+	@echo "$(GREEN)✓ Build completed successfully!$(NC)"
 
-restart: ## Restart services (use: make restart [service...] or make restart MODE=prod)
-	@echo "Restarting services in $(MODE) mode..."
-	$(COMPOSE_CMD) $(COMPOSE_FILE) $(ENV_FILE) restart $(ARGS) $(filter-out $@,$(MAKECMDGOALS))
+restart: ## Restart services (MODE=dev|prod)
+	@echo "$(YELLOW)Restarting $(ENV_MODE) services...$(NC)"
+	$(DOCKER_COMPOSE) restart
+	@echo "$(GREEN)✓ Services restarted successfully!$(NC)"
 
-shell: ## Open shell in container (use: make shell [service] or make shell SERVICE=gateway, MODE=prod, default: backend)
-	@echo "Opening shell in $(if $(filter-out $@,$(MAKECMDGOALS)),$(word 1,$(filter-out $@,$(MAKECMDGOALS))),$(SERVICE)) container ($(MODE) mode)..."
-	$(COMPOSE_CMD) $(COMPOSE_FILE) $(ENV_FILE) exec $(if $(filter-out $@,$(MAKECMDGOALS)),$(word 1,$(filter-out $@,$(MAKECMDGOALS))),$(SERVICE)) sh
+ps: ## Show running containers (MODE=dev|prod)
+	@echo "$(CYAN)Running $(ENV_MODE) containers:$(NC)"
+	$(DOCKER_COMPOSE) ps
 
-ps: ## Show running containers (use MODE=prod for production)
-	@echo "Running containers in $(MODE) mode:"
-	$(COMPOSE_CMD) $(COMPOSE_FILE) $(ENV_FILE) ps
+logs: ## View logs (SERVICE=backend|gateway|mongo, MODE=dev|prod)
+	@echo "$(CYAN)Viewing logs for $(SERVICE) in $(ENV_MODE) mode...$(NC)"
+	$(DOCKER_COMPOSE) logs -f $(SERVICE)
 
-##@ Development Aliases
+shell: ## Open shell in container (SERVICE=backend|gateway|mongo, MODE=dev|prod)
+	@echo "$(CYAN)Opening shell in $(SERVICE) container...$(NC)"
+	$(DOCKER_COMPOSE) exec $(SERVICE) /bin/sh
+
+# ============================================================================
+# Development Convenience Commands
+# ============================================================================
+dev: ## Shortcut for dev-up
+	@$(MAKE) dev-up
 
 dev-up: ## Start development environment
 	@$(MAKE) up MODE=dev
@@ -72,26 +154,17 @@ dev-logs: ## View development logs
 dev-restart: ## Restart development services
 	@$(MAKE) restart MODE=dev
 
-dev-shell: ## Open shell in backend container (dev)
-	@$(MAKE) shell MODE=dev SERVICE=backend
+dev-shell: ## Open shell in backend container (development)
+	@$(MAKE) shell SERVICE=backend MODE=dev
 
 dev-ps: ## Show running development containers
 	@$(MAKE) ps MODE=dev
 
-backend-shell: ## Open shell in backend container
-	@$(MAKE) shell SERVICE=backend
-
-gateway-shell: ## Open shell in gateway container
-	@$(MAKE) shell SERVICE=gateway
-
-mongo-shell: ## Open MongoDB shell
-	@echo "Opening MongoDB shell..."
-	$(COMPOSE_CMD) $(COMPOSE_FILE) $(ENV_FILE) exec mongo mongosh -u $(shell grep MONGO_INITDB_ROOT_USERNAME .env | cut -d '=' -f2) -p $(shell grep MONGO_INITDB_ROOT_PASSWORD .env | cut -d '=' -f2) --authenticationDatabase admin
-
-##@ Production Aliases
-
+# ============================================================================
+# Production Convenience Commands
+# ============================================================================
 prod-up: ## Start production environment
-	@$(MAKE) up MODE=prod
+	@$(MAKE) up MODE=prod ARGS="--build"
 
 prod-down: ## Stop production environment
 	@$(MAKE) down MODE=prod
@@ -105,97 +178,129 @@ prod-logs: ## View production logs
 prod-restart: ## Restart production services
 	@$(MAKE) restart MODE=prod
 
-##@ Backend Development
+prod-ps: ## Show running production containers
+	@$(MAKE) ps MODE=prod
 
+# ============================================================================
+# Service-Specific Shell Access
+# ============================================================================
+backend-shell: ## Open shell in backend container
+	@$(MAKE) shell SERVICE=backend
+
+gateway-shell: ## Open shell in gateway container
+	@$(MAKE) shell SERVICE=gateway
+
+mongo-shell: ## Open MongoDB shell
+	@echo "$(CYAN)Opening MongoDB shell...$(NC)"
+	@docker compose -f $(COMPOSE_FILE) exec mongo mongosh -u $${MONGO_INITDB_ROOT_USERNAME} -p $${MONGO_INITDB_ROOT_PASSWORD}
+
+# ============================================================================
+# Backend Development Commands
+# ============================================================================
 backend-build: ## Build backend TypeScript
-	@echo "Building backend TypeScript..."
+	@echo "$(GREEN)Building backend TypeScript...$(NC)"
 	cd backend && npm run build
+	@echo "$(GREEN)✓ Backend build completed!$(NC)"
 
 backend-install: ## Install backend dependencies
-	@echo "Installing backend dependencies..."
+	@echo "$(GREEN)Installing backend dependencies...$(NC)"
 	cd backend && npm install
+	@echo "$(GREEN)✓ Dependencies installed!$(NC)"
 
 backend-type-check: ## Type check backend code
-	@echo "Type checking backend code..."
+	@echo "$(CYAN)Type checking backend code...$(NC)"
 	cd backend && npm run type-check
 
 backend-dev: ## Run backend in development mode (local, not Docker)
-	@echo "Starting backend in local development mode..."
+	@echo "$(GREEN)Starting backend in development mode...$(NC)"
 	cd backend && npm run dev
 
-##@ Database Management
-
+# ============================================================================
+# Database Operations
+# ============================================================================
 db-reset: ## Reset MongoDB database (WARNING: deletes all data)
-	@echo "WARNING: This will delete all data in the database!"
-	@read -p "Are you sure? [y/N] " -n 1 -r; \
-	echo; \
-	if [[ $$REPLY =~ ^[Yy]$$ ]]; then \
-		echo "Resetting database..."; \
-		$(COMPOSE_CMD) $(COMPOSE_FILE) $(ENV_FILE) exec mongo mongosh -u $(shell grep MONGO_INITDB_ROOT_USERNAME .env | cut -d '=' -f2) -p $(shell grep MONGO_INITDB_ROOT_PASSWORD .env | cut -d '=' -f2) --authenticationDatabase admin --eval "use $(shell grep MONGO_DATABASE .env | cut -d '=' -f2); db.dropDatabase();"; \
-		echo "Database reset complete."; \
-	else \
-		echo "Database reset cancelled."; \
-	fi
+	@echo "$(RED)⚠️  WARNING: This will delete all data!$(NC)"
+	@echo "$(YELLOW)Press Ctrl+C to cancel, or wait 5 seconds to continue...$(NC)"
+	@sleep 5
+	@echo "$(YELLOW)Resetting database...$(NC)"
+	$(DOCKER_COMPOSE) down -v
+	$(DOCKER_COMPOSE) up -d mongo
+	@echo "$(GREEN)✓ Database reset completed!$(NC)"
 
 db-backup: ## Backup MongoDB database
-	@echo "Creating database backup..."
+	@echo "$(GREEN)Creating database backup...$(NC)"
 	@mkdir -p backups
-	$(COMPOSE_CMD) $(COMPOSE_FILE) $(ENV_FILE) exec -T mongo mongodump --username $(shell grep MONGO_INITDB_ROOT_USERNAME .env | cut -d '=' -f2) --password $(shell grep MONGO_INITDB_ROOT_PASSWORD .env | cut -d '=' -f2) --authenticationDatabase admin --db $(shell grep MONGO_DATABASE .env | cut -d '=' -f2) --archive > backups/mongo-backup-$(shell date +%Y%m%d-%H%M%S).archive
-	@echo "Backup saved to backups/ directory"
+	@docker compose -f $(COMPOSE_FILE) exec -T mongo mongodump \
+		--username=$${MONGO_INITDB_ROOT_USERNAME} \
+		--password=$${MONGO_INITDB_ROOT_PASSWORD} \
+		--authenticationDatabase=admin \
+		--archive > backups/backup-$$(date +%Y%m%d-%H%M%S).archive
+	@echo "$(GREEN)✓ Backup completed!$(NC)"
 
-##@ Cleanup
-
+# ============================================================================
+# Cleanup Commands
+# ============================================================================
 clean: ## Remove containers and networks (both dev and prod)
-	@echo "Cleaning up containers and networks..."
-	$(COMPOSE_CMD) $(COMPOSE_FILE_DEV) $(ENV_FILE) down
-	$(COMPOSE_CMD) $(COMPOSE_FILE_PROD) $(ENV_FILE) down
+	@echo "$(YELLOW)Cleaning up containers and networks...$(NC)"
+	docker compose -f docker/compose.development.yaml down
+	docker compose -f docker/compose.production.yaml down
+	@echo "$(GREEN)✓ Cleanup completed!$(NC)"
 
 clean-all: ## Remove containers, networks, volumes, and images
-	@echo "WARNING: This will remove all containers, networks, volumes, and images!"
-	@read -p "Are you sure? [y/N] " -n 1 -r; \
-	echo; \
-	if [[ $$REPLY =~ ^[Yy]$$ ]]; then \
-		echo "Removing all resources..."; \
-		$(COMPOSE_CMD) $(COMPOSE_FILE_DEV) $(ENV_FILE) down --volumes --rmi all; \
-		$(COMPOSE_CMD) $(COMPOSE_FILE_PROD) $(ENV_FILE) down --volumes --rmi all; \
-		echo "Cleanup complete."; \
-	else \
-		echo "Cleanup cancelled."; \
-	fi
+	@echo "$(RED)⚠️  WARNING: This will remove all containers, networks, volumes, and images!$(NC)"
+	@echo "$(YELLOW)Press Ctrl+C to cancel, or wait 5 seconds to continue...$(NC)"
+	@sleep 5
+	docker compose -f docker/compose.development.yaml down -v --rmi all
+	docker compose -f docker/compose.production.yaml down -v --rmi all
+	@echo "$(GREEN)✓ Complete cleanup finished!$(NC)"
 
 clean-volumes: ## Remove all volumes
-	@echo "WARNING: This will delete all data in volumes!"
-	@read -p "Are you sure? [y/N] " -n 1 -r; \
-	echo; \
-	if [[ $$REPLY =~ ^[Yy]$$ ]]; then \
-		echo "Removing volumes..."; \
-		$(COMPOSE_CMD) $(COMPOSE_FILE_DEV) $(ENV_FILE) down --volumes; \
-		$(COMPOSE_CMD) $(COMPOSE_FILE_PROD) $(ENV_FILE) down --volumes; \
-		echo "Volumes removed."; \
-	else \
-		echo "Volume removal cancelled."; \
-	fi
+	@echo "$(RED)⚠️  WARNING: This will delete all persistent data!$(NC)"
+	@echo "$(YELLOW)Press Ctrl+C to cancel, or wait 5 seconds to continue...$(NC)"
+	@sleep 5
+	docker compose -f docker/compose.development.yaml down -v
+	docker compose -f docker/compose.production.yaml down -v
+	@echo "$(GREEN)✓ Volumes removed!$(NC)"
 
-##@ Utilities
-
-status: ps ## Alias for ps
+# ============================================================================
+# Utility Commands
+# ============================================================================
+status: ## Alias for ps
+	@$(MAKE) ps
 
 health: ## Check service health
-	@echo "Checking service health..."
-	@echo "\n=== Gateway Health ==="
-	@curl -s http://localhost:5921/health | grep -q '"ok":true' && echo "✓ Gateway: Healthy" || echo "✗ Gateway: Unhealthy"
-	@echo "\n=== Backend Health (via Gateway) ==="
-	@curl -s http://localhost:5921/api/health | grep -q '"ok":true' && echo "✓ Backend: Healthy" || echo "✗ Backend: Unhealthy"
-	@echo "\n=== Container Status ==="
-	@$(MAKE) ps MODE=$(MODE)
+	@echo "$(CYAN)Checking service health...$(NC)"
+	@$(DOCKER_COMPOSE) ps --format json | jq -r '.[] | "\(.Name): \(.Health)"'
 
-##@ Help
+# ============================================================================
+# Setup Commands
+# ============================================================================
+setup: ## Initial setup - create .env if not exists
+	@if [ ! -f .env ]; then \
+		echo "$(YELLOW)Creating .env file...$(NC)"; \
+		echo "MONGO_INITDB_ROOT_USERNAME=admin" > .env; \
+		echo "MONGO_INITDB_ROOT_PASSWORD=securepassword123" >> .env; \
+		echo "MONGO_URI=mongodb://admin:securepassword123@mongo:27017" >> .env; \
+		echo "MONGO_DATABASE=ecommerce" >> .env; \
+		echo "BACKEND_PORT=3847" >> .env; \
+		echo "BACKEND_URL=http://backend:3847" >> .env; \
+		echo "GATEWAY_PORT=5921" >> .env; \
+		echo "NODE_ENV=development" >> .env; \
+		echo "$(GREEN)✓ .env file created!$(NC)"; \
+	else \
+		echo "$(YELLOW).env file already exists$(NC)"; \
+	fi
 
-help: ## Display this help message
-	@awk 'BEGIN {FS = ":.*##"; printf "\nUsage:\n  make \033[36m<target>\033[0m\n"} /^[a-zA-Z_-]+:.*?##/ { printf "  \033[36m%-20s\033[0m %s\n", $$1, $$2 } /^##@/ { printf "\n\033[1m%s\033[0m\n", substr($$0, 5) } ' $(MAKEFILE_LIST)
+# ============================================================================
+# Testing Commands
+# ============================================================================
+test: ## Run tests (if available)
+	@echo "$(CYAN)Running tests...$(NC)"
+	@echo "$(YELLOW)Tests not implemented yet$(NC)"
 
-# Allow passing targets as arguments
-%:
-	@:
-
-
+# ============================================================================
+# Monitoring Commands
+# ============================================================================
+stats: ## Show container resource usage
+	@echo "$(CYAN)Container resource usage:$(NC)"
+	@docker stats --no-stream $$(docker compose -f $(COMPOSE_FILE) ps -q)
