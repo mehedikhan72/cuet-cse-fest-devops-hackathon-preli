@@ -1,0 +1,56 @@
+# Node modules
+node_modules
+npm-debug.log
+yarn-error.log
+
+# TypeScript build output
+dist
+*.tsbuildinfo
+
+# Development files
+*.dev
+Dockerfile.dev
+.env
+.env.*
+!.env.example
+
+# Git
+.git
+.gitignore
+.gitattributes
+
+# IDE
+.vscode
+.idea
+*.swp
+*.swo
+*~
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Testing
+coverage
+*.test.ts
+*.spec.ts
+test/
+tests/
+__tests__
+
+# Documentation
+README.md
+docs/
+*.md
+
+# CI/CD
+.github
+.gitlab-ci.yml
+.travis.yml
+azure-pipelines.yml
+
+# Misc
+logs
+*.log
+tmp
+temp
