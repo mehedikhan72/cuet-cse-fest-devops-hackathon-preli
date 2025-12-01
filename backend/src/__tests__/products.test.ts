@@ -21,7 +21,7 @@ describe('Products API', () => {
         _id: '123',
         name: 'Test Product',
         price: 99.99,
-        createdAt: new Date(),
+        createdAt: new Date().toISOString(),
       };
 
       const saveMock = jest.fn().mockResolvedValue(mockProduct);
@@ -98,8 +98,8 @@ describe('Products API', () => {
   describe('GET /api/products', () => {
     it('should return list of products', async () => {
       const mockProducts = [
-        { _id: '1', name: 'Product 1', price: 10.99, createdAt: new Date() },
-        { _id: '2', name: 'Product 2', price: 20.99, createdAt: new Date() },
+        { _id: '1', name: 'Product 1', price: 10.99, createdAt: new Date().toISOString() },
+        { _id: '2', name: 'Product 2', price: 20.99, createdAt: new Date().toISOString() },
       ];
 
       const findMock = {

@@ -15,18 +15,24 @@ describe('Product Model', () => {
     });
 
     it('should have required fields', () => {
-      const schema = ProductModel.schema.obj;
+      const schema = ProductModel.schema;
+      const namePath = schema.path('name');
+      const pricePath = schema.path('price');
 
-      expect(schema.name).toBeDefined();
-      expect(schema.name.required).toBe(true);
-      expect(schema.price).toBeDefined();
-      expect(schema.price.required).toBe(true);
+      expect(namePath).toBeDefined();
+      expect(namePath?.isRequired).toBe(true);
+      expect(pricePath).toBeDefined();
+      expect(pricePath?.isRequired).toBe(true);
     });
 
     it('should have timestamps enabled', () => {
-      const schemaOptions = ProductModel.schema.options;
+      const schema = ProductModel.schema;
+      const createdAtPath = schema.path('createdAt');
+      const updatedAtPath = schema.path('updatedAt');
 
-      expect(schemaOptions.timestamps).toBe(true);
+      // If timestamps are enabled, createdAt and updatedAt paths should exist
+      expect(createdAtPath).toBeDefined();
+      expect(updatedAtPath).toBeDefined();
     });
   });
 });
