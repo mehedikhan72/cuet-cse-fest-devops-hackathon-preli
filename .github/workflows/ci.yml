@@ -1,0 +1,222 @@
+name: CI Pipeline
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+
+jobs:
+  # Backend CI
+  backend-ci:
+    name: Backend CI
+    runs-on: ubuntu-latest
+    
+    strategy:
+      matrix:
+        node-version: [18.x, 20.x]
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Setup Node.js ${{ matrix.node-version }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+          cache: 'npm'
+          cache-dependency-path: backend/package-lock.json
+      
+      - name: Install dependencies
+        working-directory: ./backend
+        run: npm ci
+      
+      - name: Run ESLint
+        working-directory: ./backend
+        run: npm run lint
+      
+      - name: Run TypeScript type check
+        working-directory: ./backend
+        run: npm run type-check
+      
+      - name: Run unit tests
+        working-directory: ./backend
+        run: npm run test:ci
+      
+      - name: Upload backend coverage
+        uses: codecov/codecov-action@v3
+        with:
+          files: ./backend/coverage/lcov.info
+          flags: backend
+          name: backend-coverage
+      
+      - name: Build backend
+        working-directory: ./backend
+        run: npm run build
+
+  # Gateway CI
+  gateway-ci:
+    name: Gateway CI
+    runs-on: ubuntu-latest
+    
+    strategy:
+      matrix:
+        node-version: [18.x, 20.x]
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Setup Node.js ${{ matrix.node-version }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+          cache: 'npm'
+          cache-dependency-path: gateway/package-lock.json
+      
+      - name: Install dependencies
+        working-directory: ./gateway
+        run: npm ci
+      
+      - name: Run ESLint
+        working-directory: ./gateway
+        run: npm run lint
+      
+      - name: Run unit tests
+        working-directory: ./gateway
+        run: npm run test:ci
+      
+      - name: Upload gateway coverage
+        uses: codecov/codecov-action@v3
+        with:
+          files: ./gateway/coverage/lcov.info
+          flags: gateway
+          name: gateway-coverage
+
+  # E2E Tests
+  e2e-tests:
+    name: E2E Tests
+    runs-on: ubuntu-latest
+    needs: [backend-ci, gateway-ci]
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Create .env file
+        run: |
+          cat > .env << EOF
+          MONGO_INITDB_ROOT_USERNAME=admin
+          MONGO_INITDB_ROOT_PASSWORD=testpass123
+          MONGO_URI=mongodb://admin:testpass123@mongo:27017/ecommerce?authSource=admin
+          MONGO_DATABASE=ecommerce
+          BACKEND_PORT=3847
+          BACKEND_URL=http://backend:3847
+          GATEWAY_PORT=5921
+          NODE_ENV=production
+          EOF
+      
+      - name: Build Docker images
+        run: |
+          docker compose -f docker/compose.production.yaml build
+      
+      - name: Start services
+        run: |
+          docker compose -f docker/compose.production.yaml up -d
+      
+      - name: Wait for services to be ready
+        run: |
+          echo "Waiting for services to start..."
+          sleep 30
+          
+          # Check gateway health
+          for i in {1..30}; do
+            if curl -f http://localhost:5921/health; then
+              echo "Gateway is ready"
+              break
+            fi
+            echo "Waiting for gateway... ($i/30)"
+            sleep 2
+          done
+          
+          # Check backend health via gateway
+          curl -f http://localhost:5921/api/health || exit 1
+      
+      - name: Run E2E tests
+        run: |
+          # Test gateway health
+          echo "Testing gateway health..."
+          curl -f http://localhost:5921/health || exit 1
+          
+          # Test backend health via gateway
+          echo "Testing backend health..."
+          curl -f http://localhost:5921/api/health || exit 1
+          
+          # Test create product
+          echo "Testing create product..."
+          RESPONSE=$(curl -X POST http://localhost:5921/api/products \
+            -H 'Content-Type: application/json' \
+            -d '{"name":"E2E Test Product","price":99.99}' \
+            -w "\n%{http_code}")
+          
+          HTTP_CODE=$(echo "$RESPONSE" | tail -n1)
+          if [ "$HTTP_CODE" != "201" ]; then
+            echo "Failed to create product. HTTP code: $HTTP_CODE"
+            exit 1
+          fi
+          
+          # Test get products
+          echo "Testing get products..."
+          curl -f http://localhost:5921/api/products || exit 1
+          
+          # Test input validation - empty name
+          echo "Testing input validation..."
+          HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" -X POST http://localhost:5921/api/products \
+            -H 'Content-Type: application/json' \
+            -d '{"name":"","price":50}')
+          
+          if [ "$HTTP_CODE" != "400" ]; then
+            echo "Input validation failed. Expected 400, got $HTTP_CODE"
+            exit 1
+          fi
+          
+          # Test security - backend should not be directly accessible
+          echo "Testing security isolation..."
+          if curl -f http://localhost:3847/api/products 2>/dev/null; then
+            echo "Security breach: Backend is directly accessible!"
+            exit 1
+          fi
+          
+          echo "All E2E tests passed!"
+      
+      - name: Show logs on failure
+        if: failure()
+        run: |
+          docker compose -f docker/compose.production.yaml logs
+      
+      - name: Cleanup
+        if: always()
+        run: |
+          docker compose -f docker/compose.production.yaml down -v
+
+  # Security Scan
+  security-scan:
+    name: Security Scan
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Run Trivy vulnerability scanner
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: 'fs'
+          scan-ref: '.'
+          format: 'sarif'
+          output: 'trivy-results.sarif'
+      
+      - name: Upload Trivy results to GitHub Security
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: 'trivy-results.sarif'

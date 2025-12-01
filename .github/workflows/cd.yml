@@ -1,0 +1,235 @@
+name: CD Pipeline
+
+on:
+  push:
+    branches: [main]
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+env:
+  DOCKER_REGISTRY: docker.io
+  BACKEND_IMAGE: ${{ secrets.DOCKERHUB_USERNAME }}/ecommerce-backend
+  GATEWAY_IMAGE: ${{ secrets.DOCKERHUB_USERNAME }}/ecommerce-gateway
+
+jobs:
+  # Build and Push Backend
+  build-backend:
+    name: Build & Push Backend
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+      
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+      
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.BACKEND_IMAGE }}
+          tags: |
+            type=ref,event=branch
+            type=ref,event=pr
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=sha,prefix={{branch}}-
+            type=raw,value=latest,enable={{is_default_branch}}
+      
+      - name: Build and push backend
+        uses: docker/build-push-action@v5
+        with:
+          context: ./backend
+          file: ./backend/Dockerfile
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=registry,ref=${{ env.BACKEND_IMAGE }}:buildcache
+          cache-to: type=registry,ref=${{ env.BACKEND_IMAGE }}:buildcache,mode=max
+          platforms: linux/amd64,linux/arm64
+
+  # Build and Push Gateway
+  build-gateway:
+    name: Build & Push Gateway
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+      
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+      
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.GATEWAY_IMAGE }}
+          tags: |
+            type=ref,event=branch
+            type=ref,event=pr
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=sha,prefix={{branch}}-
+            type=raw,value=latest,enable={{is_default_branch}}
+      
+      - name: Build and push gateway
+        uses: docker/build-push-action@v5
+        with:
+          context: ./gateway
+          file: ./gateway/Dockerfile
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=registry,ref=${{ env.GATEWAY_IMAGE }}:buildcache
+          cache-to: type=registry,ref=${{ env.GATEWAY_IMAGE }}:buildcache,mode=max
+          platforms: linux/amd64,linux/arm64
+
+  # Verify Deployment
+  verify-images:
+    name: Verify Deployment
+    runs-on: ubuntu-latest
+    needs: [build-backend, build-gateway]
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+      
+      - name: Pull and verify backend image
+        run: |
+          docker pull ${{ env.BACKEND_IMAGE }}:latest
+          docker inspect ${{ env.BACKEND_IMAGE }}:latest
+      
+      - name: Pull and verify gateway image
+        run: |
+          docker pull ${{ env.GATEWAY_IMAGE }}:latest
+          docker inspect ${{ env.GATEWAY_IMAGE }}:latest
+      
+      - name: Run smoke test
+        run: |
+          # Create .env file
+          cat > .env << EOF
+          MONGO_INITDB_ROOT_USERNAME=admin
+          MONGO_INITDB_ROOT_PASSWORD=testpass123
+          MONGO_URI=mongodb://admin:testpass123@mongo:27017/ecommerce?authSource=admin
+          MONGO_DATABASE=ecommerce
+          BACKEND_PORT=3847
+          BACKEND_URL=http://backend:3847
+          GATEWAY_PORT=5921
+          NODE_ENV=production
+          EOF
+          
+          # Update docker-compose to use pulled images
+          cat > docker-compose.smoke.yaml << EOF
+          services:
+            mongo:
+              image: mongo:7-jammy
+              environment:
+                MONGO_INITDB_ROOT_USERNAME: \${MONGO_INITDB_ROOT_USERNAME}
+                MONGO_INITDB_ROOT_PASSWORD: \${MONGO_INITDB_ROOT_PASSWORD}
+              networks:
+                - test-network
+              healthcheck:
+                test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+                interval: 10s
+                timeout: 5s
+                retries: 5
+            
+            backend:
+              image: ${{ env.BACKEND_IMAGE }}:latest
+              environment:
+                NODE_ENV: production
+                BACKEND_PORT: \${BACKEND_PORT}
+                MONGO_URI: \${MONGO_URI}
+                MONGO_DATABASE: \${MONGO_DATABASE}
+              networks:
+                - test-network
+              depends_on:
+                mongo:
+                  condition: service_healthy
+            
+            gateway:
+              image: ${{ env.GATEWAY_IMAGE }}:latest
+              ports:
+                - "5921:5921"
+              environment:
+                NODE_ENV: production
+                GATEWAY_PORT: \${GATEWAY_PORT}
+                BACKEND_URL: \${BACKEND_URL}
+              networks:
+                - test-network
+              depends_on:
+                - backend
+          
+          networks:
+            test-network:
+              driver: bridge
+          EOF
+          
+          # Start services
+          docker compose -f docker-compose.smoke.yaml up -d
+          
+          # Wait for services
+          sleep 30
+          
+          # Test gateway
+          curl -f http://localhost:5921/health || exit 1
+          curl -f http://localhost:5921/api/health || exit 1
+          
+          # Cleanup
+          docker compose -f docker-compose.smoke.yaml down -v
+          
+          echo "Smoke tests passed!"
+
+  # Create GitHub Release
+  create-release:
+    name: Create Release
+    runs-on: ubuntu-latest
+    needs: [verify-images]
+    if: startsWith(github.ref, 'refs/tags/v')
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Create Release
+        uses: actions/create-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: ${{ github.ref }}
+          release_name: Release ${{ github.ref }}
+          body: |
+            ## Docker Images
+            
+            Backend: `${{ env.BACKEND_IMAGE }}:${{ github.ref_name }}`
+            Gateway: `${{ env.GATEWAY_IMAGE }}:${{ github.ref_name }}`
+            
+            ## Deployment
+            
+            ```bash
+            docker pull ${{ env.BACKEND_IMAGE }}:${{ github.ref_name }}
+            docker pull ${{ env.GATEWAY_IMAGE }}:${{ github.ref_name }}
+            ```
+          draft: false
+          prerelease: false
