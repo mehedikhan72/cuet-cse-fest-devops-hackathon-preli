@@ -118,11 +118,11 @@ jobs:
       
       - name: Build Docker images
         run: |
-          docker compose -f docker/compose.production.yaml build
+          docker compose -f docker/compose.production.yaml --env-file .env build
       
       - name: Start services
         run: |
-          docker compose -f docker/compose.production.yaml up -d
+          docker compose -f docker/compose.production.yaml --env-file .env up -d
       
       - name: Wait for services to be ready
         run: |
@@ -192,12 +192,12 @@ jobs:
       - name: Show logs on failure
         if: failure()
         run: |
-          docker compose -f docker/compose.production.yaml logs
+          docker compose -f docker/compose.production.yaml --env-file .env logs
       
       - name: Cleanup
         if: always()
         run: |
-          docker compose -f docker/compose.production.yaml down -v
+          docker compose -f docker/compose.production.yaml --env-file .env down -v
 
   # Security Scan
   security-scan:
