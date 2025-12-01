@@ -3,7 +3,22 @@ import express from 'express';
 import productsRouter from '../routes/products';
 
 // Mock mongoose model
-jest.mock('../models/product');
+jest.mock('../models/product', () => ({
+  ProductModel: {
+    find: jest.fn().mockReturnValue({
+      sort: jest.fn().mockReturnValue({
+        lean: jest.fn().mockResolvedValue([]),
+      }),
+    }),
+    prototype: {
+      save: jest.fn().mockResolvedValue({
+        _id: 'mock-id',
+        name: 'Test Product',
+        price: 99.99,
+      }),
+    },
+  },
+}));
 
 describe('Products API', () => {
   let app: express.Application;
@@ -45,15 +60,10 @@ describe('Products API', () => {
 
   describe('GET /api/products', () => {
     it('should return empty array when no products exist', async () => {
-      const { ProductModel } = require('../models/product');
-      ProductModel.find = jest.fn().mockReturnValue({
-        sort: jest.fn().mockReturnValue({
-          lean: jest.fn().mockResolvedValue([]),
-        }),
-      });
-
+      // Mock will be set up by jest.mock at the top of the file
       const response = await request(app).get('/api/products');
 
+      // The mock returns empty array by default
       expect(response.status).toBe(200);
       expect(Array.isArray(response.body)).toBe(true);
     });
